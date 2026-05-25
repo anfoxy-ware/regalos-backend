@@ -111,6 +111,17 @@ app.post('/api/auth/login', async (req, res) => {
   }
 });
 
+app.get('/api/debug/time', (req, res) => {
+  const now = new Date();
+  const options = { timeZone: 'America/Santo_Domingo', year: 'numeric', month: '2-digit', day: '2-digit' };
+  const rdDate = new Intl.DateTimeFormat('en-CA', options).format(now);
+  res.json({
+    serverUTC: now.toISOString(),
+    serverLocal: now.toString(),
+    rdDate: rdDate,
+    rdISO: new Date(now.toLocaleString('en-US', { timeZone: 'America/Santo_Domingo' })).toISOString().slice(0,10)
+  });
+});
 // ──────────────────────────────────────────────────────────────
 //  REGALOS DEL USUARIO (GET)
 // ──────────────────────────────────────────────────────────────
