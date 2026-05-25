@@ -80,8 +80,10 @@ app.post('/api/gifts', authMiddleware, upload.single('image'), async (req, res) 
   const { title, description, category, dateRD } = req.body;
   const userId = req.user.id;
 
-  // Validar que la fecha enviada esté dentro del período del usuario
-  if (dateRD < req.user.start_date || dateRD > req.user.end_date) {
+  const startDateStr = new Date(req.user.start_date).toISOString().slice(0, 10);
+  const endDateStr = new Date(req.user.end_date).toISOString().slice(0, 10);
+
+  if (dateRD < startDateStr || dateRD > endDateStr) {
     return res.status(400).json({ message: 'Fuera del período permitido' });
   }
 
@@ -145,17 +147,25 @@ app.put('/api/gifts/:id', authMiddleware, async (req, res) => {
   res.json(updated[0]);
 });
 
-// Estado del día (recibe dateRD por query string)
+// Estado del día
 app.get('/api/gifts/today-status', authMiddleware, async (req, res) => {
   const dateRD = req.query.dateRD;
   if (!dateRD) {
     return res.status(400).json({ message: 'Falta el parámetro dateRD' });
   }
+  
   const [existing] = await pool.query(
     'SELECT id FROM gifts WHERE user_id = ? AND date_rd = ?',
     [req.user.id, dateRD]
   );
-  const canUpload = existing.length === 0 && dateRD >= req.user.start_date && dateRD <= req.user.end_date;
+  
+  // Convertimos las fechas de la DB a formato String "YYYY-MM-DD"
+  const startDateStr = new Date(req.user.start_date).toISOString().slice(0, 10);
+  const endDateStr = new Date(req.user.end_date).toISOString().slice(0, 10);
+
+  // Ahora sí estamos comparando String contra String
+  const canUpload = existing.length === 0 && dateRD >= startDateStr && dateRD <= endDateStr;
+  
   res.json({ canUpload });
 });
 
