@@ -29,9 +29,9 @@ const pool = mysql.createPool({
   waitForConnections: true,
   connectionLimit: 10,
   ssl: {
-    rejectUnauthorized: false   // Esto permite conexión TLS sin verificar el certificado (útil para desarrollo)
-    // Si tienes el archivo CA que menciona TiDB, puedes usarlo así:
-    // ca: fs.readFileSync('/ruta/al/ca.pem')
+    rejectUnauthorized: false   // Esto evita la verificación estricta del certificado (útil para desarrollo)
+    // Para mayor seguridad, puedes descargar el CA de TiDB Cloud y referenciarlo:
+    // ca: fs.readFileSync('/path/to/ca.pem')
   }
 });
 
