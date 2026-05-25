@@ -90,11 +90,11 @@ app.post('/api/gifts', authMiddleware, upload.single('image'), async (req, res) 
   if (today < req.user.start_date || today > req.user.end_date) {
     return res.status(400).json({ message: 'Fuera del período permitido' });
   }
-  // Verificar si ya subió hoy
-  const [existing] = await pool.query('SELECT id FROM gifts WHERE user_id = ? AND DATE(created_at) = CURDATE()', [userId]);
-  if (existing.length > 0) {
-    return res.status(400).json({ message: 'Ya subiste un regalo hoy' });
-  }
+// Verificación de 1 regalo por día (comentada temporalmente)
+// const [existing] = await pool.query('SELECT id FROM gifts WHERE user_id = ? AND DATE(created_at) = CURDATE()', [userId]);
+// if (existing.length > 0) {
+//   return res.status(400).json({ message: 'Ya subiste un regalo hoy' });
+// }
   let imageUrl = null;
   if (req.file) {
     const result = await new Promise((resolve, reject) => {
