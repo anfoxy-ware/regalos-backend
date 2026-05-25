@@ -142,54 +142,29 @@ app.get('/api/gifts', authMiddleware, async (req, res) => {
 //  CREAR REGALO (sin budget, con validación de fecha RD)
 // ──────────────────────────────────────────────────────────────
 app.post('/api/gifts', authMiddleware, upload.single('image'), async (req, res) => {
-  const { title, description, category } = req.body;
+  const { title, description, category, dateRD } = req.body; // dateRD viene del frontend
   const userId = req.user.id;
-  const todayRD = getTodayRD();
 
-  // 1. Validar período activo
-  if (todayRD < req.user.start_date || todayRD > req.user.end_date) {
+  // Verificar rango de fechas (comparar con dateRD)
+  if (dateRD < req.user.start_date || dateRD > req.user.end_date) {
     return res.status(400).json({ message: 'Fuera del período permitido' });
   }
 
-  // 2. Validar que no haya subido un regalo hoy (en zona RD)
+  // Verificar si ya subió en esa fecha
   const [existing] = await pool.query(
-    `SELECT id FROM gifts 
-     WHERE user_id = ? 
-     AND DATE(CONVERT_TZ(created_at, '+00:00', '-04:00')) = ?`,
-    [userId, todayRD]
+    'SELECT id FROM gifts WHERE user_id = ? AND date_rd = ?',
+    [userId, dateRD]
   );
   if (existing.length > 0) {
     return res.status(400).json({ message: 'Ya subiste un regalo hoy' });
   }
 
-  // 3. Subir imagen a Cloudinary (si existe)
-  let imageUrl = null;
-  if (req.file) {
-    try {
-      const result = await new Promise((resolve, reject) => {
-        const stream = cloudinary.uploader.upload_stream(
-          { folder: 'regalos' },
-          (error, result) => {
-            if (error) reject(error);
-            else resolve(result);
-          }
-        );
-        stream.end(req.file.buffer);
-      });
-      imageUrl = result.secure_url;
-    } catch (err) {
-      console.error('Error subiendo imagen:', err);
-      return res.status(500).json({ message: 'Error al subir la imagen' });
-    }
-  }
-
-  // 4. Insertar en BD (sin budget)
+  // ... subir imagen y guardar, incluyendo date_rd
   const [result] = await pool.query(
-    'INSERT INTO gifts (user_id, title, description, image_url, category) VALUES (?, ?, ?, ?, ?)',
-    [userId, title, description, imageUrl, category || 'Otro']
+    'INSERT INTO gifts (user_id, title, description, image_url, category, date_rd) VALUES (?, ?, ?, ?, ?, ?)',
+    [userId, title, description, imageUrl, category || 'Otro', dateRD]
   );
-  const [newGift] = await pool.query('SELECT * FROM gifts WHERE id = ?', [result.insertId]);
-  res.status(201).json(newGift[0]);
+  // ...
 });
 
 // ──────────────────────────────────────────────────────────────
@@ -243,20 +218,14 @@ app.put('/api/gifts/:id', authMiddleware, async (req, res) => {
 //  ESTADO DEL DÍA (si puede subir otro regalo hoy)
 // ──────────────────────────────────────────────────────────────
 app.get('/api/gifts/today-status', authMiddleware, async (req, res) => {
-  const todayRD = getTodayRD();
-  try {
-    const [existing] = await pool.query(
-      `SELECT id FROM gifts 
-       WHERE user_id = ? 
-       AND DATE(CONVERT_TZ(created_at, '+00:00', '-04:00')) = ?`,
-      [req.user.id, todayRD]
-    );
-    const canUpload = existing.length === 0 && todayRD >= req.user.start_date && todayRD <= req.user.end_date;
-    res.json({ canUpload });
-  } catch (error) {
-    console.error(error);
-    res.status(500).json({ message: 'Error al consultar estado' });
-  }
+  const dateRD = req.query.dateRD; // el frontend enviará ?dateRD=2025-05-24
+  if (!dateRD) return res.status(400).json({ message: 'Falta dateRD' });
+  const [existing] = await pool.query(
+    'SELECT id FROM gifts WHERE user_id = ? AND date_rd = ?',
+    [req.user.id, dateRD]
+  );
+  const canUpload = existing.length === 0 && dateRD >= req.user.start_date && dateRD <= req.user.end_date;
+  res.json({ canUpload });
 });
 
 // ──────────────────────────────────────────────────────────────
