@@ -58,18 +58,6 @@ const adminMiddleware = (req, res, next) => {
   next();
 };
 
-app.post('/api/debug/reset-admin', async (req, res) => {
-  try {
-    const bcrypt = require('bcryptjs');
-    const newHash = await bcrypt.hash('admin123', 10);
-    await pool.query('UPDATE users SET password = ? WHERE username = ?', [newHash, 'admin']);
-    res.json({ message: 'Contraseña de admin actualizada correctamente', newHash });
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: err.message });
-  }
-});
-
 // Ruta login
 app.post('/api/auth/login', async (req, res) => {
   const { username, password } = req.body;
