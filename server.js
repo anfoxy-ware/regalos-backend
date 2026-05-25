@@ -22,11 +22,17 @@ cloudinary.config({
 // Pool de conexiones MySQL
 const pool = mysql.createPool({
   host: process.env.DB_HOST,
+  port: process.env.DB_PORT,
   user: process.env.DB_USER,
   password: process.env.DB_PASSWORD,
   database: process.env.DB_NAME,
   waitForConnections: true,
-  connectionLimit: 10
+  connectionLimit: 10,
+  ssl: {
+    rejectUnauthorized: false   // Esto permite conexión TLS sin verificar el certificado (útil para desarrollo)
+    // Si tienes el archivo CA que menciona TiDB, puedes usarlo así:
+    // ca: fs.readFileSync('/ruta/al/ca.pem')
+  }
 });
 
 // Middleware para verificar token JWT
