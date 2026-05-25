@@ -58,6 +58,15 @@ const adminMiddleware = (req, res, next) => {
   next();
 };
 
+app.get('/api/debug/users', async (req, res) => {
+  try {
+    const [rows] = await pool.query('SELECT username, role FROM users');
+    res.json(rows);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // Ruta login
 app.post('/api/auth/login', async (req, res) => {
   const { username, password } = req.body;
