@@ -142,7 +142,7 @@ app.put('/api/gifts/:id', authMiddleware, async (req, res) => {
 
 // Estado de hoy (si puede subir)
 app.get('/api/gifts/today-status', authMiddleware, async (req, res) => {
-  const [existing] = await pool.query('SELECT id FROM gifts WHERE user_id = ? AND DATE(created_at) = CURDATE()', [req.user.id]);
+  const [existing] = await pool.query('SELECT id FROM gifts WHERE user_id = ? AND DATE(created_at) = UTC_DATE()', [userId]);
   const canUpload = existing.length === 0 && req.user.start_date <= new Date().toISOString().slice(0,10) && req.user.end_date >= new Date().toISOString().slice(0,10);
   res.json({ canUpload });
 });
