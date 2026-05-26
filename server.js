@@ -237,7 +237,7 @@ cron.schedule('* * * * *', async () => {
       );
       if (existing.length === 0) {
         await sendReminderEmail(user.email, user.username, todayRD);
-        await pool.query('UPDATE users SET last_reminder_sent = ? WHERE id = ?', [todayRD, user.id]);
+        //await pool.query('UPDATE users SET last_reminder_sent = ? WHERE id = ?', [todayRD, user.id]);
       }
     }
     console.log('Recordatorios completados.');
