@@ -38,13 +38,15 @@ const pool = mysql.createPool({
 const transporter = nodemailer.createTransport({
   host: 'smtp.gmail.com',
   port: 587,
-  secure: false, // Debe ser false para el puerto 587 (usa STARTTLS en lugar de SSL directo)
+  secure: false, // false porque el puerto 587 usa STARTTLS
   auth: {
     user: process.env.GMAIL_USER,
     pass: process.env.GMAIL_APP_PASSWORD
   },
+  // 1. Fuerza a Render a usar IPv4 (así evitamos el error ENETUNREACH)
+  family: 4, 
+  // 2. Evita problemas de rechazo de certificados dentro de la red de Render
   tls: {
-    // Esto asegura que Render no rechace el certificado de Gmail por temas de red interna
     rejectUnauthorized: false 
   }
 });
