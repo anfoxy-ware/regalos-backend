@@ -61,24 +61,30 @@ app.post('/api/auth/login', async (req, res) => {
   try {
     const [rows] = await pool.query('SELECT * FROM users WHERE username = ?', [username]);
     if (rows.length === 0) return res.status(401).json({ message: 'Credenciales inválidas' });
-    const user = rows[0];
+    
+    // Aquí definimos al usuario. Si esto se borró antes, causaba el error "null"
+    const user = rows[0]; 
+    
     const valid = await bcrypt.compare(password, user.password);
     if (!valid) return res.status(401).json({ message: 'Credenciales inválidas' });
+    
     const token = jwt.sign({ id: user.id, username: user.username, role: user.role }, process.env.JWT_SECRET, { expiresIn: '7d' });
+    
+    // Devolvemos el usuario con sus nuevos campos de correo
     res.json({ 
-  token, 
-  user: { 
-    id: user.id, 
-    username: user.username, 
-    role: user.role, 
-    start_date: user.start_date, 
-    end_date: user.end_date,
-    email: user.email, 
-    reminders_enabled: user.reminders_enabled 
-  } 
-});
+      token, 
+      user: { 
+        id: user.id, 
+        username: user.username, 
+        role: user.role, 
+        start_date: user.start_date, 
+        end_date: user.end_date,
+        email: user.email, 
+        reminders_enabled: user.reminders_enabled 
+      } 
+    });
   } catch (error) {
-    console.error(error);
+    console.error("Error en login:", error);
     res.status(500).json({ message: 'Error en el servidor' });
   }
 });
