@@ -7,6 +7,8 @@ const jwt = require('jsonwebtoken');
 const cloudinary = require('cloudinary').v2;
 const multer = require('multer');
 const upload = multer({ storage: multer.memoryStorage() });
+const { Resend } = require('resend');
+const cron = require('node-cron');
 
 const app = express();
 app.use(cors());
@@ -30,6 +32,15 @@ const pool = mysql.createPool({
   dateStrings: true
 });
 
+// Configurar Resend
+const resend = new Resend(process.env.RESEND_API_KEY);
+
+// Función para obtener fecha actual en República Dominicana
+function getTodayRD() {
+  const now = new Date();
+  return now.toLocaleDateString('en-CA', { timeZone: 'America/Santo_Domingo' });
+}
+
 // Middleware de autenticación
 const authMiddleware = async (req, res, next) => {
   const authHeader = req.headers.authorization;
@@ -39,7 +50,7 @@ const authMiddleware = async (req, res, next) => {
   const token = authHeader.split(' ')[1];
   try {
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
-    const [rows] = await pool.query('SELECT id, username, role, start_date, end_date FROM users WHERE id = ?', [decoded.id]);
+    const [rows] = await pool.query('SELECT id, username, role, start_date, end_date, email FROM users WHERE id = ?', [decoded.id]);
     if (rows.length === 0) throw new Error();
     req.user = rows[0];
     next();
@@ -53,7 +64,7 @@ const adminMiddleware = (req, res, next) => {
   next();
 };
 
-// Ruta login (sin cambios)
+// Ruta login
 app.post('/api/auth/login', async (req, res) => {
   const { username, password } = req.body;
   try {
@@ -63,7 +74,7 @@ app.post('/api/auth/login', async (req, res) => {
     const valid = await bcrypt.compare(password, user.password);
     if (!valid) return res.status(401).json({ message: 'Credenciales inválidas' });
     const token = jwt.sign({ id: user.id, username: user.username, role: user.role }, process.env.JWT_SECRET, { expiresIn: '7d' });
-    res.json({ token, user: { id: user.id, username: user.username, role: user.role, start_date: user.start_date, end_date: user.end_date } });
+    res.json({ token, user: { id: user.id, username: user.username, role: user.role, start_date: user.start_date, end_date: user.end_date, email: user.email } });
   } catch (error) {
     console.error(error);
     res.status(500).json({ message: 'Error en el servidor' });
@@ -76,7 +87,7 @@ app.get('/api/gifts', authMiddleware, async (req, res) => {
   res.json(rows);
 });
 
-// Crear regalo (recibe dateRD del frontend)
+// Crear regalo
 app.post('/api/gifts', authMiddleware, upload.single('image'), async (req, res) => {
   const { title, description, category, dateRD } = req.body;
   const userId = req.user.id;
@@ -88,11 +99,7 @@ app.post('/api/gifts', authMiddleware, upload.single('image'), async (req, res) 
     return res.status(400).json({ message: 'Fuera del período permitido' });
   }
 
-  // Verificar si ya existe un regalo con esa fecha (date_rd)
-  const [existing] = await pool.query(
-    'SELECT id FROM gifts WHERE user_id = ? AND date_rd = ?',
-    [userId, dateRD]
-  );
+  const [existing] = await pool.query('SELECT id FROM gifts WHERE user_id = ? AND date_rd = ?', [userId, dateRD]);
   if (existing.length > 0) {
     return res.status(400).json({ message: 'Ya subiste un regalo hoy' });
   }
@@ -151,41 +158,115 @@ app.put('/api/gifts/:id', authMiddleware, async (req, res) => {
 // Estado del día
 app.get('/api/gifts/today-status', authMiddleware, async (req, res) => {
   const dateRD = req.query.dateRD;
-  if (!dateRD) {
-    return res.status(400).json({ message: 'Falta el parámetro dateRD' });
-  }
-  
-  const [existing] = await pool.query(
-    'SELECT id FROM gifts WHERE user_id = ? AND date_rd = ?',
-    [req.user.id, dateRD]
-  );
-  
-  // Convertimos las fechas de la DB a formato String "YYYY-MM-DD"
+  if (!dateRD) return res.status(400).json({ message: 'Falta dateRD' });
+  const [existing] = await pool.query('SELECT id FROM gifts WHERE user_id = ? AND date_rd = ?', [req.user.id, dateRD]);
   const startDateStr = new Date(req.user.start_date).toISOString().slice(0, 10);
   const endDateStr = new Date(req.user.end_date).toISOString().slice(0, 10);
-
-  // Ahora sí estamos comparando String contra String
   const canUpload = existing.length === 0 && dateRD >= startDateStr && dateRD <= endDateStr;
-  
   res.json({ canUpload });
 });
 
-// ADMIN: usuarios
+// ─────────────────────────────────────────────
+//  EMAIL: Actualizar email del propio usuario
+// ─────────────────────────────────────────────
+app.put('/api/users/email', authMiddleware, async (req, res) => {
+  const { email } = req.body;
+  if (!email || !email.includes('@')) {
+    return res.status(400).json({ message: 'Email inválido' });
+  }
+  await pool.query('UPDATE users SET email = ? WHERE id = ?', [email, req.user.id]);
+  // Actualizar el objeto currentUser en el frontend (devolvemos el nuevo email)
+  const [updated] = await pool.query('SELECT email FROM users WHERE id = ?', [req.user.id]);
+  res.json({ email: updated[0].email });
+});
+
+// ADMIN: Actualizar email de cualquier usuario
+app.put('/api/admin/users/:id/email', authMiddleware, adminMiddleware, async (req, res) => {
+  const { email } = req.body;
+  const userId = req.params.id;
+  if (!email || !email.includes('@')) {
+    return res.status(400).json({ message: 'Email inválido' });
+  }
+  await pool.query('UPDATE users SET email = ? WHERE id = ?', [email, userId]);
+  res.json({ message: 'Email actualizado' });
+});
+
+// Función para enviar recordatorio con Resend
+async function sendReminderEmail(userEmail, username, todayDate) {
+  try {
+    const { data, error } = await resend.emails.send({
+      from: process.env.RESEND_FROM_EMAIL, // ejemplo: "Recordatorios <recordatorios@tudominio.com>"
+      to: [userEmail],
+      subject: `🌟 ¿Olvidaste tu regalo de hoy? - ${todayDate}`,
+      html: `
+        <div style="font-family: 'Jost', Arial; max-width: 500px; margin: auto; padding: 20px; border: 1px solid #f0e1cc; border-radius: 20px; background: #fef7e8;">
+          <div style="text-align: center;">
+            <div style="font-size: 48px;">🎁</div>
+            <h2 style="color: #8C3A4D;">¡Hola, ${username}!</h2>
+            <p style="color: #4A2E22;">Hoy es <strong>${todayDate}</strong> y aún no has dejado tu regalo diario.</p>
+            <p>Entra a <a href="${process.env.FRONTEND_URL}" style="color: #C49A2F;">tu jardín de deseos</a> y comparte un pequeño antojo.</p>
+            <p style="font-size: 12px; color: #7A5C50;">Si ya lo hiciste, ignora este mensaje. ¡Gracias por participar!</p>
+          </div>
+        </div>
+      `
+    });
+    if (error) {
+      console.error(`Error enviando a ${userEmail}:`, error);
+    } else {
+      console.log(`✅ Recordatorio enviado a ${userEmail} (ID: ${data?.id})`);
+    }
+  } catch (err) {
+    console.error(`Excepción al enviar a ${userEmail}:`, err);
+  }
+}
+
+// Programar tarea diaria a las 8:00 AM hora RD (UTC-4)
+cron.schedule('0 8 * * *', async () => {
+  console.log('Ejecutando recordatorios diarios...');
+  const todayRD = getTodayRD();
+  try {
+    const [users] = await pool.query(
+      `SELECT id, username, email FROM users 
+       WHERE email IS NOT NULL AND email != '' 
+       AND start_date <= ? AND end_date >= ?
+       AND (last_reminder_sent IS NULL OR last_reminder_sent < ?)`,
+      [todayRD, todayRD, todayRD]
+    );
+    for (const user of users) {
+      const [existing] = await pool.query(
+        'SELECT id FROM gifts WHERE user_id = ? AND date_rd = ?',
+        [user.id, todayRD]
+      );
+      if (existing.length === 0) {
+        await sendReminderEmail(user.email, user.username, todayRD);
+        await pool.query('UPDATE users SET last_reminder_sent = ? WHERE id = ?', [todayRD, user.id]);
+      }
+    }
+    console.log('Recordatorios completados.');
+  } catch (error) {
+    console.error('Error en cron de recordatorios:', error);
+  }
+}, { timezone: "America/Santo_Domingo" });
+
+// ADMIN: usuarios (incluir email en respuesta)
 app.get('/api/admin/users', authMiddleware, adminMiddleware, async (req, res) => {
-  const [rows] = await pool.query('SELECT id, username, role, start_date, end_date, created_at FROM users');
+  const [rows] = await pool.query('SELECT id, username, role, start_date, end_date, email, created_at FROM users');
   res.json(rows);
 });
 
 app.post('/api/admin/users', authMiddleware, adminMiddleware, async (req, res) => {
-  const { username, password, role, start_date, end_date } = req.body;
+  const { username, password, role, start_date, end_date, email } = req.body;
   const hashed = await bcrypt.hash(password, 10);
-  const [result] = await pool.query('INSERT INTO users (username, password, role, start_date, end_date) VALUES (?, ?, ?, ?, ?)', [username, hashed, role, start_date, end_date]);
-  const [newUser] = await pool.query('SELECT id, username, role, start_date, end_date FROM users WHERE id = ?', [result.insertId]);
+  const [result] = await pool.query(
+    'INSERT INTO users (username, password, role, start_date, end_date, email) VALUES (?, ?, ?, ?, ?, ?)',
+    [username, hashed, role, start_date, end_date, email || null]
+  );
+  const [newUser] = await pool.query('SELECT id, username, role, start_date, end_date, email FROM users WHERE id = ?', [result.insertId]);
   res.status(201).json(newUser[0]);
 });
 
 app.put('/api/admin/users/:id', authMiddleware, adminMiddleware, async (req, res) => {
-  const { start_date, end_date, role, password } = req.body;
+  const { start_date, end_date, role, password, email } = req.body;
   const userId = req.params.id;
   let query = 'UPDATE users SET start_date = ?, end_date = ?, role = ?';
   let params = [start_date, end_date, role];
@@ -194,10 +275,14 @@ app.put('/api/admin/users/:id', authMiddleware, adminMiddleware, async (req, res
     query += ', password = ?';
     params.push(hashed);
   }
+  if (email !== undefined) {
+    query += ', email = ?';
+    params.push(email);
+  }
   query += ' WHERE id = ?';
   params.push(userId);
   await pool.query(query, params);
-  const [updated] = await pool.query('SELECT id, username, role, start_date, end_date FROM users WHERE id = ?', [userId]);
+  const [updated] = await pool.query('SELECT id, username, role, start_date, end_date, email FROM users WHERE id = ?', [userId]);
   res.json(updated[0]);
 });
 
