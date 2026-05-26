@@ -6,8 +6,6 @@ const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const cloudinary = require('cloudinary').v2;
 const multer = require('multer');
-const nodemailer = require('nodemailer'); // <-- NUEVO: Para enviar correos
-const cron = require('node-cron'); // <-- NUEVO: Para tareas programadas
 const upload = multer({ storage: multer.memoryStorage() });
 
 const app = express();
@@ -32,138 +30,37 @@ const pool = mysql.createPool({
   dateStrings: true
 });
 
-// --- CONFIGURACIÓN DE CORREOS ---
-const transporter = nodemailer.createTransport({
-  service: 'gmail', // Puedes cambiarlo si usas Outlook, Yahoo, etc.
-  auth: {
-    user: process.env.EMAIL_USER,
-    pass: process.env.EMAIL_PASS
-  }
-});
-
-// Función para obtener la fecha actual en República Dominicana (UTC-4)
-const getTodayRD = () => {
-  const now = new Date();
-  now.setHours(now.getHours() - 4);
-  return now.toISOString().slice(0, 10);
-};
-
-// Lógica principal de recordatorios
-const sendDailyReminders = async () => {
-  console.log('Iniciando revisión de recordatorios diarios...');
-  try {
-    const todayStr = getTodayRD();
-    
-    // 1. Buscar usuarios con correo y recordatorios activados
-    const [users] = await pool.query(
-      'SELECT id, username, email, start_date, end_date FROM users WHERE email IS NOT NULL AND email != "" AND reminders_enabled = 1'
-    );
-
-    let correosEnviados = 0;
-
-    for (const user of users) {
-      const startStr = new Date(user.start_date).toISOString().slice(0, 10);
-      const endStr = new Date(user.end_date).toISOString().slice(0, 10);
-
-      // 2. Verificar si están dentro de sus fechas permitidas
-      if (todayStr >= startStr && todayStr <= endStr) {
-        
-        // 3. Verificar si YA subieron un regalo hoy
-        const [gifts] = await pool.query(
-          'SELECT id FROM gifts WHERE user_id = ? AND date_rd = ?',
-          [user.id, todayStr]
-        );
-
-        // 4. Si no tienen regalos hoy, les mandamos el correo
-        if (gifts.length === 0) {
-          const mailOptions = {
-            from: `"Diario de Regalos" <${process.env.EMAIL_USER}>`,
-            to: user.email,
-            subject: '¡No olvides subir tu momento de hoy! 🎁',
-            html: `
-              <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #eee; border-radius: 10px;">
-                <h2 style="color: #d81b60;">¡Hola ${user.username}!</h2>
-                <p>Notamos que aún no has registrado tu momento o regalo del día de hoy.</p>
-                <p>No dejes que se te escape el día. Entra ahora y guarda ese bonito recuerdo antes de que termine la jornada.</p>
-                <br>
-                <a href="https://tu-pagina-web.com" style="background-color: #d81b60; color: white; padding: 10px 20px; text-decoration: none; border-radius: 5px; display: inline-block;">Ir a mi Diario</a>
-                <br><br>
-                <p style="color: #777; font-size: 12px;">Si ya no deseas recibir estos correos, avísale al administrador.</p>
-              </div>
-            `
-          };
-
-          await transporter.sendMail(mailOptions);
-          console.log(`Recordatorio enviado con éxito a: ${user.email}`);
-          correosEnviados++;
-        }
-      }
-    }
-    console.log(`Revisión terminada. Se enviaron ${correosEnviados} correos hoy.`);
-    return correosEnviados;
-  } catch (error) {
-    console.error('Error al enviar los recordatorios:', error);
-    throw error;
-  }
-};
-
-// Programar tarea automática (Cron Job) - Se ejecuta todos los días a las 19:00 (7 PM)
-cron.schedule('0 19 * * *', () => {
-  sendDailyReminders();
-});
-
 // Middleware de autenticación
-const authMiddleware = async (req, res, next) => {
-  const authHeader = req.headers.authorization;
-  if (!authHeader || !authHeader.startsWith('Bearer ')) {
-    return res.status(401).json({ message: 'No autorizado' });
-  }
-  const token = authHeader.split(' ')[1];
-  try {
-    const decoded = jwt.verify(token, process.env.JWT_SECRET);
-    const [rows] = await pool.query('SELECT id, username, role, start_date, end_date, email, reminders_enabled FROM users WHERE id = ?', [decoded.id]);
-    if (rows.length === 0) throw new Error();
-    req.user = rows[0];
-    next();
-  } catch (error) {
-    res.status(401).json({ message: 'Token inválido' });
-  }
-};
 
-// Middleware Admin
 const adminMiddleware = (req, res, next) => {
   if (req.user.role !== 'admin') return res.status(403).json({ message: 'Acceso denegado' });
   next();
 };
 
-// Ruta login
+// Ruta login (sin cambios)
 app.post('/api/auth/login', async (req, res) => {
   const { username, password } = req.body;
   try {
     const [rows] = await pool.query('SELECT * FROM users WHERE username = ?', [username]);
     if (rows.length === 0) return res.status(401).json({ message: 'Credenciales inválidas' });
-    
-    const user = rows[0]; 
-    
+    const user = rows[0];
     const valid = await bcrypt.compare(password, user.password);
     if (!valid) return res.status(401).json({ message: 'Credenciales inválidas' });
-    
     const token = jwt.sign({ id: user.id, username: user.username, role: user.role }, process.env.JWT_SECRET, { expiresIn: '7d' });
-    
     res.json({ 
-      token, 
-      user: { 
-        id: user.id, 
-        username: user.username, 
-        role: user.role, 
-        start_date: user.start_date, 
-        end_date: user.end_date,
-        email: user.email, 
-        reminders_enabled: user.reminders_enabled 
-      } 
-    });
+  token, 
+  user: { 
+    id: user.id, 
+    username: user.username, 
+    role: user.role, 
+    start_date: user.start_date, 
+    end_date: user.end_date,
+    email: user.email, 
+    reminders_enabled: user.reminders_enabled 
+  } 
+});
   } catch (error) {
-    console.error("Error en login:", error);
+    console.error(error);
     res.status(500).json({ message: 'Error en el servidor' });
   }
 });
@@ -174,7 +71,7 @@ app.get('/api/gifts', authMiddleware, async (req, res) => {
   res.json(rows);
 });
 
-// Crear regalo
+// Crear regalo (recibe dateRD del frontend)
 app.post('/api/gifts', authMiddleware, upload.single('image'), async (req, res) => {
   const { title, description, category, dateRD } = req.body;
   const userId = req.user.id;
@@ -186,6 +83,7 @@ app.post('/api/gifts', authMiddleware, upload.single('image'), async (req, res) 
     return res.status(400).json({ message: 'Fuera del período permitido' });
   }
 
+  // Verificar si ya existe un regalo con esa fecha (date_rd)
   const [existing] = await pool.query(
     'SELECT id FROM gifts WHERE user_id = ? AND date_rd = ?',
     [userId, dateRD]
@@ -257,25 +155,28 @@ app.get('/api/gifts/today-status', authMiddleware, async (req, res) => {
     [req.user.id, dateRD]
   );
   
+  // Convertimos las fechas de la DB a formato String "YYYY-MM-DD"
   const startDateStr = new Date(req.user.start_date).toISOString().slice(0, 10);
   const endDateStr = new Date(req.user.end_date).toISOString().slice(0, 10);
 
+  // Ahora sí estamos comparando String contra String
   const canUpload = existing.length === 0 && dateRD >= startDateStr && dateRD <= endDateStr;
   
   res.json({ canUpload });
 });
 
-// ADMIN: Obtener todos los usuarios
+// ADMIN: Obtener todos los usuarios (Actualizado)
 app.get('/api/admin/users', authMiddleware, adminMiddleware, async (req, res) => {
   const [rows] = await pool.query('SELECT id, username, role, start_date, end_date, email, reminders_enabled, created_at FROM users');
   res.json(rows);
 });
 
-// ADMIN: Crear usuario
+// ADMIN: Crear usuario (Actualizado)
 app.post('/api/admin/users', authMiddleware, adminMiddleware, async (req, res) => {
   const { username, password, role, start_date, end_date, email, reminders_enabled } = req.body;
   const hashed = await bcrypt.hash(password, 10);
   
+  // Si no envían reminders_enabled, por defecto es true
   const isEnabled = reminders_enabled !== undefined ? reminders_enabled : true; 
 
   const [result] = await pool.query(
@@ -289,7 +190,7 @@ app.post('/api/admin/users', authMiddleware, adminMiddleware, async (req, res) =
   res.status(201).json(newUser[0]);
 });
 
-// ADMIN: Editar usuario
+// ADMIN: Editar usuario (Actualizado)
 app.put('/api/admin/users/:id', authMiddleware, adminMiddleware, async (req, res) => {
   const { start_date, end_date, role, password, email, reminders_enabled } = req.body;
   const userId = req.params.id;
@@ -329,16 +230,6 @@ app.put('/api/admin/gifts/:id/favorite', authMiddleware, adminMiddleware, async 
   const newFavorite = !gift[0].favorite;
   await pool.query('UPDATE gifts SET favorite = ? WHERE id = ?', [newFavorite, giftId]);
   res.json({ id: giftId, favorite: newFavorite });
-});
-
-// --- RUTA SECRETA PARA PROBAR CORREOS MANUALMENTE ---
-app.post('/api/admin/trigger-reminders', authMiddleware, adminMiddleware, async (req, res) => {
-  try {
-    const enviados = await sendDailyReminders();
-    res.json({ message: `Revisión completada. Se enviaron ${enviados} correos.` });
-  } catch (error) {
-    res.status(500).json({ message: 'Error al enviar correos', error: error.message });
-  }
 });
 
 // Iniciar servidor
