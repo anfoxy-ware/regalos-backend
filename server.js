@@ -50,6 +50,12 @@ const authMiddleware = async (req, res, next) => {
 };
 
 // Ruta login (sin cambios)
+const adminMiddleware = (req, res, next) => {
+  if (req.user.role !== 'admin') return res.status(403).json({ message: 'Acceso denegado' });
+  next();
+};
+
+// Ruta login (sin cambios)
 app.post('/api/auth/login', async (req, res) => {
   const { username, password } = req.body;
   try {
