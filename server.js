@@ -31,6 +31,22 @@ const pool = mysql.createPool({
 });
 
 // Middleware de autenticación
+const authMiddleware = async (req, res, next) => {
+  const authHeader = req.headers.authorization;
+  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    return res.status(401).json({ message: 'No autorizado' });
+  }
+  const token = authHeader.split(' ')[1];
+  try {
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    const [rows] = await pool.query('SELECT id, username, role, start_date, end_date FROM users WHERE id = ?', [decoded.id]);
+    if (rows.length === 0) throw new Error();
+    req.user = rows[0];
+    next();
+  } catch (error) {
+    res.status(401).json({ message: 'Token inválido' });
+  }
+};
 
 const adminMiddleware = (req, res, next) => {
   if (req.user.role !== 'admin') return res.status(403).json({ message: 'Acceso denegado' });
@@ -47,18 +63,7 @@ app.post('/api/auth/login', async (req, res) => {
     const valid = await bcrypt.compare(password, user.password);
     if (!valid) return res.status(401).json({ message: 'Credenciales inválidas' });
     const token = jwt.sign({ id: user.id, username: user.username, role: user.role }, process.env.JWT_SECRET, { expiresIn: '7d' });
-    res.json({ 
-  token, 
-  user: { 
-    id: user.id, 
-    username: user.username, 
-    role: user.role, 
-    start_date: user.start_date, 
-    end_date: user.end_date,
-    email: user.email, 
-    reminders_enabled: user.reminders_enabled 
-  } 
-});
+    res.json({ token, user: { id: user.id, username: user.username, role: user.role, start_date: user.start_date, end_date: user.end_date } });
   } catch (error) {
     console.error(error);
     res.status(500).json({ message: 'Error en el servidor' });
@@ -165,40 +170,25 @@ app.get('/api/gifts/today-status', authMiddleware, async (req, res) => {
   res.json({ canUpload });
 });
 
-// ADMIN: Obtener todos los usuarios (Actualizado)
+// ADMIN: usuarios
 app.get('/api/admin/users', authMiddleware, adminMiddleware, async (req, res) => {
-  const [rows] = await pool.query('SELECT id, username, role, start_date, end_date, email, reminders_enabled, created_at FROM users');
+  const [rows] = await pool.query('SELECT id, username, role, start_date, end_date, created_at FROM users');
   res.json(rows);
 });
 
-// ADMIN: Crear usuario (Actualizado)
 app.post('/api/admin/users', authMiddleware, adminMiddleware, async (req, res) => {
-  const { username, password, role, start_date, end_date, email, reminders_enabled } = req.body;
+  const { username, password, role, start_date, end_date } = req.body;
   const hashed = await bcrypt.hash(password, 10);
-  
-  // Si no envían reminders_enabled, por defecto es true
-  const isEnabled = reminders_enabled !== undefined ? reminders_enabled : true; 
-
-  const [result] = await pool.query(
-    'INSERT INTO users (username, password, role, start_date, end_date, email, reminders_enabled) VALUES (?, ?, ?, ?, ?, ?, ?)', 
-    [username, hashed, role, start_date, end_date, email || null, isEnabled]
-  );
-  const [newUser] = await pool.query(
-    'SELECT id, username, role, start_date, end_date, email, reminders_enabled FROM users WHERE id = ?', 
-    [result.insertId]
-  );
+  const [result] = await pool.query('INSERT INTO users (username, password, role, start_date, end_date) VALUES (?, ?, ?, ?, ?)', [username, hashed, role, start_date, end_date]);
+  const [newUser] = await pool.query('SELECT id, username, role, start_date, end_date FROM users WHERE id = ?', [result.insertId]);
   res.status(201).json(newUser[0]);
 });
 
-// ADMIN: Editar usuario (Actualizado)
 app.put('/api/admin/users/:id', authMiddleware, adminMiddleware, async (req, res) => {
-  const { start_date, end_date, role, password, email, reminders_enabled } = req.body;
+  const { start_date, end_date, role, password } = req.body;
   const userId = req.params.id;
-  
-  let query = 'UPDATE users SET start_date = ?, end_date = ?, role = ?, email = ?, reminders_enabled = ?';
-  const isEnabled = reminders_enabled !== undefined ? reminders_enabled : true;
-  let params = [start_date, end_date, role, email || null, isEnabled];
-  
+  let query = 'UPDATE users SET start_date = ?, end_date = ?, role = ?';
+  let params = [start_date, end_date, role];
   if (password) {
     const hashed = await bcrypt.hash(password, 10);
     query += ', password = ?';
@@ -206,9 +196,8 @@ app.put('/api/admin/users/:id', authMiddleware, adminMiddleware, async (req, res
   }
   query += ' WHERE id = ?';
   params.push(userId);
-  
   await pool.query(query, params);
-  const [updated] = await pool.query('SELECT id, username, role, start_date, end_date, email, reminders_enabled FROM users WHERE id = ?', [userId]);
+  const [updated] = await pool.query('SELECT id, username, role, start_date, end_date FROM users WHERE id = ?', [userId]);
   res.json(updated[0]);
 });
 
