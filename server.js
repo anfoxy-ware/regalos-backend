@@ -221,7 +221,7 @@ async function sendReminderEmail(userEmail, username, todayDate) {
 }
 
 // Programar tarea diaria a las 8:00 AM hora RD (UTC-4)
-cron.schedule('0 8 * * *', async () => {
+cron.schedule('* * * * *', async () => {
   console.log('Ejecutando recordatorios diarios...');
   const todayRD = getTodayRD();
   try {
@@ -306,21 +306,6 @@ app.put('/api/admin/gifts/:id/favorite', authMiddleware, adminMiddleware, async 
   res.json({ id: giftId, favorite: newFavorite });
 });
 
-// Endpoint de prueba para enviar un recordatorio manual a un email específico
-app.post('/api/test-reminder', async (req, res) => {
-  const { email, username } = req.body;
-  if (!email || !email.includes('@')) {
-    return res.status(400).json({ error: 'Email inválido' });
-  }
-  const todayRD = getTodayRD();
-  try {
-    await sendReminderEmail(email, username || 'Usuario', todayRD);
-    res.json({ message: `Correo de prueba enviado a ${email}` });
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: err.message });
-  }
-});
 // Iniciar servidor
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log(`Servidor corriendo en puerto ${PORT}`));

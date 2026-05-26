@@ -28,3 +28,7 @@ build/
 # Temporary files
 *.tmp
 *.temp
+
+test-bj.js
+test_send.js
+hash.js
