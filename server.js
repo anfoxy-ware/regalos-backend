@@ -30,11 +30,23 @@ const pool = mysql.createPool({
   dateStrings: true
 });
 
-// Middleware de autenticación
-
-const adminMiddleware = (req, res, next) => {
-  if (req.user.role !== 'admin') return res.status(403).json({ message: 'Acceso denegado' });
-  next();
+// Middleware de autenticación (Actualizado)
+const authMiddleware = async (req, res, next) => {
+  const authHeader = req.headers.authorization;
+  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    return res.status(401).json({ message: 'No autorizado' });
+  }
+  const token = authHeader.split(' ')[1];
+  try {
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    // Agregamos email y reminders_enabled al SELECT
+    const [rows] = await pool.query('SELECT id, username, role, start_date, end_date, email, reminders_enabled FROM users WHERE id = ?', [decoded.id]);
+    if (rows.length === 0) throw new Error();
+    req.user = rows[0];
+    next();
+  } catch (error) {
+    res.status(401).json({ message: 'Token inválido' });
+  }
 };
 
 // Ruta login (sin cambios)
