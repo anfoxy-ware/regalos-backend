@@ -36,11 +36,15 @@ const pool = mysql.createPool({
 //  CONFIGURACIÓN DE CORREO (GMAIL + NODEMAILER)
 // ─────────────────────────────────────────────
 const transporter = nodemailer.createTransport({
-  service: 'gmail',
+  host: 'smtp.gmail.com',
+  port: 465,
+  secure: true, // true para 465, false para otros puertos
   auth: {
     user: process.env.GMAIL_USER,
     pass: process.env.GMAIL_APP_PASSWORD
-  }
+  },
+  // ¡Esta es la línea clave que soluciona tu error! Fuerza el uso de IPv4
+  family: 4
 });
 
 // Función para obtener fecha actual en República Dominicana
