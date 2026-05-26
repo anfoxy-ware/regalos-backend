@@ -7,7 +7,7 @@ const jwt = require('jsonwebtoken');
 const cloudinary = require('cloudinary').v2;
 const multer = require('multer');
 const upload = multer({ storage: multer.memoryStorage() });
-const { Resend } = require('resend');
+const nodemailer = require('nodemailer');
 const cron = require('node-cron');
 
 const app = express();
@@ -32,8 +32,16 @@ const pool = mysql.createPool({
   dateStrings: true
 });
 
-// Configurar Resend
-const resend = new Resend(process.env.RESEND_API_KEY);
+// ─────────────────────────────────────────────
+//  CONFIGURACIÓN DE CORREO (GMAIL + NODEMAILER)
+// ─────────────────────────────────────────────
+const transporter = nodemailer.createTransport({
+  service: 'gmail',
+  auth: {
+    user: process.env.GMAIL_USER,
+    pass: process.env.GMAIL_APP_PASSWORD
+  }
+});
 
 // Función para obtener fecha actual en República Dominicana
 function getTodayRD() {
@@ -41,7 +49,7 @@ function getTodayRD() {
   return now.toLocaleDateString('en-CA', { timeZone: 'America/Santo_Domingo' });
 }
 
-// Middleware de autenticación
+// Middlewares de autenticación
 const authMiddleware = async (req, res, next) => {
   const authHeader = req.headers.authorization;
   if (!authHeader || !authHeader.startsWith('Bearer ')) {
@@ -64,7 +72,9 @@ const adminMiddleware = (req, res, next) => {
   next();
 };
 
-// Ruta login
+// ─────────────────────────────────────────────
+//  RUTAS DE AUTENTICACIÓN, REGALOS, ETC.
+// ─────────────────────────────────────────────
 app.post('/api/auth/login', async (req, res) => {
   const { username, password } = req.body;
   try {
@@ -81,29 +91,23 @@ app.post('/api/auth/login', async (req, res) => {
   }
 });
 
-// Obtener regalos del usuario
 app.get('/api/gifts', authMiddleware, async (req, res) => {
   const [rows] = await pool.query('SELECT * FROM gifts WHERE user_id = ? ORDER BY created_at DESC', [req.user.id]);
   res.json(rows);
 });
 
-// Crear regalo
 app.post('/api/gifts', authMiddleware, upload.single('image'), async (req, res) => {
   const { title, description, category, dateRD } = req.body;
   const userId = req.user.id;
-
   const startDateStr = new Date(req.user.start_date).toISOString().slice(0, 10);
   const endDateStr = new Date(req.user.end_date).toISOString().slice(0, 10);
-
   if (dateRD < startDateStr || dateRD > endDateStr) {
     return res.status(400).json({ message: 'Fuera del período permitido' });
   }
-
   const [existing] = await pool.query('SELECT id FROM gifts WHERE user_id = ? AND date_rd = ?', [userId, dateRD]);
   if (existing.length > 0) {
     return res.status(400).json({ message: 'Ya subiste un regalo hoy' });
   }
-
   let imageUrl = null;
   if (req.file) {
     try {
@@ -120,7 +124,6 @@ app.post('/api/gifts', authMiddleware, upload.single('image'), async (req, res) 
       return res.status(500).json({ message: 'Error al subir la imagen' });
     }
   }
-
   const [result] = await pool.query(
     'INSERT INTO gifts (user_id, title, description, image_url, category, date_rd) VALUES (?, ?, ?, ?, ?, ?)',
     [userId, title, description, imageUrl, category || 'Otro', dateRD]
@@ -129,7 +132,6 @@ app.post('/api/gifts', authMiddleware, upload.single('image'), async (req, res) 
   res.status(201).json(newGift[0]);
 });
 
-// Eliminar regalo
 app.delete('/api/gifts/:id', authMiddleware, async (req, res) => {
   const giftId = req.params.id;
   const [gift] = await pool.query('SELECT * FROM gifts WHERE id = ?', [giftId]);
@@ -141,7 +143,6 @@ app.delete('/api/gifts/:id', authMiddleware, async (req, res) => {
   res.status(204).send();
 });
 
-// Editar regalo
 app.put('/api/gifts/:id', authMiddleware, async (req, res) => {
   const { title, description, category } = req.body;
   const giftId = req.params.id;
@@ -155,7 +156,6 @@ app.put('/api/gifts/:id', authMiddleware, async (req, res) => {
   res.json(updated[0]);
 });
 
-// Estado del día
 app.get('/api/gifts/today-status', authMiddleware, async (req, res) => {
   const dateRD = req.query.dateRD;
   if (!dateRD) return res.status(400).json({ message: 'Falta dateRD' });
@@ -167,7 +167,7 @@ app.get('/api/gifts/today-status', authMiddleware, async (req, res) => {
 });
 
 // ─────────────────────────────────────────────
-//  EMAIL: Actualizar email del propio usuario
+//  EMAIL: ACTUALIZAR EMAIL DEL USUARIO
 // ─────────────────────────────────────────────
 app.put('/api/users/email', authMiddleware, async (req, res) => {
   const { email } = req.body;
@@ -175,12 +175,10 @@ app.put('/api/users/email', authMiddleware, async (req, res) => {
     return res.status(400).json({ message: 'Email inválido' });
   }
   await pool.query('UPDATE users SET email = ? WHERE id = ?', [email, req.user.id]);
-  // Actualizar el objeto currentUser en el frontend (devolvemos el nuevo email)
   const [updated] = await pool.query('SELECT email FROM users WHERE id = ?', [req.user.id]);
   res.json({ email: updated[0].email });
 });
 
-// ADMIN: Actualizar email de cualquier usuario
 app.put('/api/admin/users/:id/email', authMiddleware, adminMiddleware, async (req, res) => {
   const { email } = req.body;
   const userId = req.params.id;
@@ -191,12 +189,14 @@ app.put('/api/admin/users/:id/email', authMiddleware, adminMiddleware, async (re
   res.json({ message: 'Email actualizado' });
 });
 
-// Función para enviar recordatorio con Resend
+// ─────────────────────────────────────────────
+//  FUNCIÓN PARA ENVIAR CORREO (NODEMAILER)
+// ─────────────────────────────────────────────
 async function sendReminderEmail(userEmail, username, todayDate) {
   try {
-    const { data, error } = await resend.emails.send({
-      from: process.env.RESEND_FROM_EMAIL, // ejemplo: "Recordatorios <recordatorios@tudominio.com>"
-      to: [userEmail],
+    const info = await transporter.sendMail({
+      from: `"Regalos Diarios" <${process.env.GMAIL_USER}>`,
+      to: userEmail,
       subject: `🌟 ¿Olvidaste tu regalo de hoy? - ${todayDate}`,
       html: `
         <div style="font-family: 'Jost', Arial; max-width: 500px; margin: auto; padding: 20px; border: 1px solid #f0e1cc; border-radius: 20px; background: #fef7e8;">
@@ -210,18 +210,16 @@ async function sendReminderEmail(userEmail, username, todayDate) {
         </div>
       `
     });
-    if (error) {
-      console.error(`Error enviando a ${userEmail}:`, error);
-    } else {
-      console.log(`✅ Recordatorio enviado a ${userEmail} (ID: ${data?.id})`);
-    }
-  } catch (err) {
-    console.error(`Excepción al enviar a ${userEmail}:`, err);
+    console.log(`✅ Recordatorio enviado a ${userEmail} (ID: ${info.messageId})`);
+  } catch (error) {
+    console.error(`❌ Error enviando a ${userEmail}:`, error);
   }
 }
 
-// Programar tarea diaria a las 8:00 AM hora RD (UTC-4)
-cron.schedule('* * * * *', async () => {
+// ─────────────────────────────────────────────
+//  CRON DIARIO (8:00 AM HORA RD)
+// ─────────────────────────────────────────────
+cron.schedule('0 8 * * *', async () => {
   console.log('Ejecutando recordatorios diarios...');
   const todayRD = getTodayRD();
   try {
@@ -248,7 +246,9 @@ cron.schedule('* * * * *', async () => {
   }
 }, { timezone: "America/Santo_Domingo" });
 
-// ADMIN: usuarios (incluir email en respuesta)
+// ─────────────────────────────────────────────
+//  ADMIN: USUARIOS Y REGALOS GLOBALES
+// ─────────────────────────────────────────────
 app.get('/api/admin/users', authMiddleware, adminMiddleware, async (req, res) => {
   const [rows] = await pool.query('SELECT id, username, role, start_date, end_date, email, created_at FROM users');
   res.json(rows);
@@ -291,7 +291,6 @@ app.delete('/api/admin/users/:id', authMiddleware, adminMiddleware, async (req, 
   res.status(204).send();
 });
 
-// ADMIN: regalos globales
 app.get('/api/admin/gifts', authMiddleware, adminMiddleware, async (req, res) => {
   const [rows] = await pool.query('SELECT g.*, u.username FROM gifts g JOIN users u ON g.user_id = u.id ORDER BY g.created_at DESC');
   res.json(rows);
