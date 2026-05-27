@@ -7,7 +7,7 @@ const jwt = require('jsonwebtoken');
 const cloudinary = require('cloudinary').v2;
 const multer = require('multer');
 const upload = multer({ storage: multer.memoryStorage() });
-const nodemailer = require('nodemailer');
+const { google } = require('googleapis');
 const cron = require('node-cron');
 
 const app = express();
@@ -33,22 +33,16 @@ const pool = mysql.createPool({
 });
 
 // ─────────────────────────────────────────────
-//  CONFIGURACIÓN DE CORREO (GMAIL + NODEMAILER)
+//   CONFIGURACIÓN DE CORREO (GMAIL API - HTTP)
 // ─────────────────────────────────────────────
-const transporter = nodemailer.createTransport({
-  host: 'smtp.gmail.com',
-  port: 587,
-  secure: false, // false porque el puerto 587 usa STARTTLS
-  auth: {
-    user: process.env.GMAIL_USER,
-    pass: process.env.GMAIL_APP_PASSWORD
-  },
-  // 1. Fuerza a Render a usar IPv4 (así evitamos el error ENETUNREACH)
-  family: 4, 
-  // 2. Evita problemas de rechazo de certificados dentro de la red de Render
-  tls: {
-    rejectUnauthorized: false 
-  }
+const oauth2Client = new google.auth.OAuth2(
+  process.env.GOOGLE_CLIENT_ID,
+  process.env.GOOGLE_CLIENT_SECRET,
+  'https://developers.google.com/oauthplayground'
+);
+
+oauth2Client.setCredentials({
+  refresh_token: process.env.GOOGLE_REFRESH_TOKEN
 });
 
 // Función para obtener fecha actual en República Dominicana
@@ -202,25 +196,43 @@ app.put('/api/admin/users/:id/email', authMiddleware, adminMiddleware, async (re
 // ─────────────────────────────────────────────
 async function sendReminderEmail(userEmail, username, todayDate) {
   try {
-    const info = await transporter.sendMail({
-      from: `"Regalos Diarios" <${process.env.GMAIL_USER}>`,
-      to: userEmail,
-      subject: `🌟 ¿Olvidaste tu regalo de hoy? - ${todayDate}`,
-      html: `
-        <div style="font-family: 'Jost', Arial; max-width: 500px; margin: auto; padding: 20px; border: 1px solid #f0e1cc; border-radius: 20px; background: #fef7e8;">
-          <div style="text-align: center;">
-            <div style="font-size: 48px;">🎁</div>
-            <h2 style="color: #8C3A4D;">¡Hola, ${username}!</h2>
-            <p style="color: #4A2E22;">Hoy es <strong>${todayDate}</strong> y aún no has dejado tu regalo diario.</p>
-            <p>Entra a <a href="${process.env.FRONTEND_URL}" style="color: #C49A2F;">tu jardín de deseos</a> y comparte un pequeño antojo.</p>
-            <p style="font-size: 12px; color: #7A5C50;">Si ya lo hiciste, ignora este mensaje. ¡Gracias por participar!</p>
-          </div>
-        </div>
-      `
+    const gmail = google.gmail({ version: 'v1', auth: oauth2Client });
+
+    // Estructura del correo estándar RFC 2822 requerida por la API de Google
+    const rawMessage = Buffer.from(
+      `From: "Regalos Diarios" <${process.env.GMAIL_USER}>\r\n` +
+      `To: ${userEmail}\r\n` +
+      `Subject: =?utf-8?B?${Buffer.from(`🌟 ¿Olvidaste tu regalo de hoy? - ${todayDate}`).toString('base64')}?=\r\n` +
+      `MIME-Version: 1.0\r\n` +
+      `Content-Type: text/html; charset=utf-8\r\n\r\n` +
+      `<div style="font-family: 'Jost', Arial; max-width: 500px; margin: auto; padding: 20px; border: 1px solid #f0e1cc; border-radius: 20px; background: #fef7e8;">` +
+      `  <div style="text-align: center;">` +
+      `    <div style="font-size: 48px;">🎁</div>` +
+      `    <h2 style="color: #8C3A4D;">¡Hola, ${username}!</h2>` +
+      `    <p style="color: #4A2E22;">Hoy es <strong>${todayDate}</strong> y aún no has dejado tu regalo diario.</p>` +
+      `    <p>Entra a <a href="${process.env.FRONTEND_URL}" style="color: #C49A2F;">tu jardín de deseos</a> y comparte un pequeño antojo.</p>` +
+      `    <p style="font-size: 12px; color: #7A5C50;">Si ya lo hiciste, ignora este mensaje. ¡Gracias por participar!</p>` +
+      `  </div>` +
+      `</div>`
+    );
+
+    // La API de Gmail exige que el string esté codificado en Base64 URL Safe
+    const encodedMessage = rawMessage.toString('base64')
+      .replace(/\+/g, '-')
+      .replace(/\//g, '_')
+      .replace(/=+$/, '');
+
+    // Hacemos la petición por el puerto 443 (HTTP), el cual Render NO bloquea
+    const response = await gmail.users.messages.send({
+      userId: 'me',
+      requestBody: {
+        raw: encodedMessage,
+      },
     });
-    console.log(`✅ Recordatorio enviado a ${userEmail} (ID: ${info.messageId})`);
+
+    console.log(`✅ Recordatorio enviado vía API de Gmail a ${userEmail} (ID: ${response.data.id})`);
   } catch (error) {
-    console.error(`❌ Error enviando a ${userEmail}:`, error);
+    console.error(`❌ Error enviando vía API a ${userEmail}:`, error);
   }
 }
 
