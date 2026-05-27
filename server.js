@@ -239,10 +239,12 @@ async function sendReminderEmail(userEmail, username, todayDate) {
 // ─────────────────────────────────────────────
 //  CRON DIARIO (8:00 AM HORA RD)
 // ─────────────────────────────────────────────
-cron.schedule('* * * * *', async () => {
-  console.log('Ejecutando recordatorios diarios...');
+cron.schedule('30 10 * * *', async () => {
+  console.log('Ejecutando recordatorios diarios a las 10:30 AM...');
   const todayRD = getTodayRD();
+  
   try {
+    // 1. Buscamos solo usuarios que NO hayan recibido el correo hoy
     const [users] = await pool.query(
       `SELECT id, username, email FROM users 
        WHERE email IS NOT NULL AND email != '' 
@@ -250,14 +252,21 @@ cron.schedule('* * * * *', async () => {
        AND (last_reminder_sent IS NULL OR last_reminder_sent < ?)`,
       [todayRD, todayRD, todayRD]
     );
+
     for (const user of users) {
       const [existing] = await pool.query(
         'SELECT id FROM gifts WHERE user_id = ? AND date_rd = ?',
         [user.id, todayRD]
       );
+
       if (existing.length === 0) {
         await sendReminderEmail(user.email, user.username, todayRD);
-        //await pool.query('UPDATE users SET last_reminder_sent = ? WHERE id = ?', [todayRD, user.id]);
+        
+        // 2. IMPORTANTE: Guardamos en la BD que ya se le envió el correo hoy
+        await pool.query(
+          'UPDATE users SET last_reminder_sent = ? WHERE id = ?', 
+          [todayRD, user.id]
+        );
       }
     }
     console.log('Recordatorios completados.');
