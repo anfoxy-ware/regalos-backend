@@ -97,8 +97,8 @@ res.json({
     start_date: user.start_date, end_date: user.end_date, email: user.email,
     reminders_enabled: user.reminders_enabled,
     reminder_time_930: user.reminder_time_930,
-    reminder_time_1230: user.reminder_time_1330,
-    reminder_time_1830: user.reminder_time_1930
+    reminder_time_1330: user.reminder_time_1330,
+    reminder_time_1930: user.reminder_time_1930
   } 
 });
   } catch (error) {
@@ -138,8 +138,8 @@ app.put('/api/users/profile', authMiddleware, async (req, res) => {
       id: userId, username, email,
       reminders_enabled: reminders_enabled ? 1 : 0,
       reminder_time_930: reminder_time_930 ? 1 : 0,
-      reminder_time_1230: reminder_time_1330 ? 1 : 0,
-      reminder_time_1830: reminder_time_1930 ? 1 : 0,
+      reminder_time_1330: reminder_time_1330 ? 1 : 0,
+      reminder_time_1930: reminder_time_1930 ? 1 : 0,
       role: req.user.role 
     });
   } catch (error) {
