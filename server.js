@@ -51,7 +51,9 @@ function getTodayRD() {
   return now.toLocaleDateString('en-CA', { timeZone: 'America/Santo_Domingo' });
 }
 
-// Middlewares de autenticación
+// ─────────────────────────────────────────────
+//   MIDDLEWARES
+// ─────────────────────────────────────────────
 const authMiddleware = async (req, res, next) => {
   const authHeader = req.headers.authorization;
   if (!authHeader || !authHeader.startsWith('Bearer ')) {
@@ -60,7 +62,8 @@ const authMiddleware = async (req, res, next) => {
   const token = authHeader.split(' ')[1];
   try {
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
-    const [rows] = await pool.query('SELECT id, username, role, start_date, end_date, email FROM users WHERE id = ?', [decoded.id]);
+    // Agregamos reminders_enabled a la sesión interna
+    const [rows] = await pool.query('SELECT id, username, role, start_date, end_date, email, reminders_enabled FROM users WHERE id = ?', [decoded.id]);
     if (rows.length === 0) throw new Error();
     req.user = rows[0];
     next();
@@ -75,24 +78,84 @@ const adminMiddleware = (req, res, next) => {
 };
 
 // ─────────────────────────────────────────────
-//  RUTAS DE AUTENTICACIÓN, REGALOS, ETC.
+//  RUTAS DE AUTENTICACIÓN Y PERFIL
 // ─────────────────────────────────────────────
 app.post('/api/auth/login', async (req, res) => {
   const { username, password } = req.body;
   try {
     const [rows] = await pool.query('SELECT * FROM users WHERE username = ?', [username]);
     if (rows.length === 0) return res.status(401).json({ message: 'Credenciales inválidas' });
+    
     const user = rows[0];
     const valid = await bcrypt.compare(password, user.password);
     if (!valid) return res.status(401).json({ message: 'Credenciales inválidas' });
+    
     const token = jwt.sign({ id: user.id, username: user.username, role: user.role }, process.env.JWT_SECRET, { expiresIn: '7d' });
-    res.json({ token, user: { id: user.id, username: user.username, role: user.role, start_date: user.start_date, end_date: user.end_date, email: user.email } });
+    
+    res.json({ 
+      token, 
+      user: { 
+        id: user.id, 
+        username: user.username, 
+        role: user.role, 
+        start_date: user.start_date, 
+        end_date: user.end_date, 
+        email: user.email,
+        reminders_enabled: user.reminders_enabled // Enviamos el estado de notificaciones
+      } 
+    });
   } catch (error) {
     console.error(error);
     res.status(500).json({ message: 'Error en el servidor' });
   }
 });
 
+// NUEVA RUTA UNIFICADA: Actualizar Perfil (Sustituye a las viejas rutas de email)
+app.put('/api/users/profile', authMiddleware, async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const { username, email, password, reminders_enabled } = req.body; 
+
+    if (!username) {
+      return res.status(400).json({ message: 'El nombre de usuario es obligatorio' });
+    }
+
+    const remindersVal = reminders_enabled ? 1 : 0;
+    let updateQuery = 'UPDATE users SET username = ?, email = ?, reminders_enabled = ?';
+    let queryParams = [username, email || null, remindersVal];
+
+    if (password) {
+      const saltRounds = 10;
+      const hashedPassword = await bcrypt.hash(password, saltRounds);
+      updateQuery += ', password = ?';
+      queryParams.push(hashedPassword);
+    }
+
+    updateQuery += ' WHERE id = ?';
+    queryParams.push(userId);
+
+    await pool.query(updateQuery, queryParams);
+
+    res.json({
+      id: userId,
+      username: username,
+      email: email,
+      reminders_enabled: remindersVal,
+      role: req.user.role 
+    });
+
+  } catch (error) {
+    console.error('❌ Error actualizando el perfil:', error);
+    if (error.code === 'ER_DUP_ENTRY') {
+      return res.status(409).json({ message: 'Ese nombre de usuario ya está en uso' });
+    }
+    res.status(500).json({ message: 'Error interno del servidor al actualizar perfil' });
+  }
+});
+
+// ─────────────────────────────────────────────
+//  RUTAS DE REGALOS
+// ─────────────────────────────────────────────
 app.get('/api/gifts', authMiddleware, async (req, res) => {
   const [rows] = await pool.query('SELECT * FROM gifts WHERE user_id = ? ORDER BY created_at DESC', [req.user.id]);
   res.json(rows);
@@ -103,13 +166,16 @@ app.post('/api/gifts', authMiddleware, upload.single('image'), async (req, res) 
   const userId = req.user.id;
   const startDateStr = new Date(req.user.start_date).toISOString().slice(0, 10);
   const endDateStr = new Date(req.user.end_date).toISOString().slice(0, 10);
+  
   if (dateRD < startDateStr || dateRD > endDateStr) {
     return res.status(400).json({ message: 'Fuera del período permitido' });
   }
+  
   const [existing] = await pool.query('SELECT id FROM gifts WHERE user_id = ? AND date_rd = ?', [userId, dateRD]);
   if (existing.length > 0) {
     return res.status(400).json({ message: 'Ya subiste un regalo hoy' });
   }
+  
   let imageUrl = null;
   if (req.file) {
     try {
@@ -126,10 +192,12 @@ app.post('/api/gifts', authMiddleware, upload.single('image'), async (req, res) 
       return res.status(500).json({ message: 'Error al subir la imagen' });
     }
   }
+  
   const [result] = await pool.query(
     'INSERT INTO gifts (user_id, title, description, image_url, category, date_rd) VALUES (?, ?, ?, ?, ?, ?)',
     [userId, title, description, imageUrl, category || 'Otro', dateRD]
   );
+  
   const [newGift] = await pool.query('SELECT * FROM gifts WHERE id = ?', [result.insertId]);
   res.status(201).json(newGift[0]);
 });
@@ -169,36 +237,12 @@ app.get('/api/gifts/today-status', authMiddleware, async (req, res) => {
 });
 
 // ─────────────────────────────────────────────
-//  EMAIL: ACTUALIZAR EMAIL DEL USUARIO
-// ─────────────────────────────────────────────
-app.put('/api/users/email', authMiddleware, async (req, res) => {
-  const { email } = req.body;
-  if (!email || !email.includes('@')) {
-    return res.status(400).json({ message: 'Email inválido' });
-  }
-  await pool.query('UPDATE users SET email = ? WHERE id = ?', [email, req.user.id]);
-  const [updated] = await pool.query('SELECT email FROM users WHERE id = ?', [req.user.id]);
-  res.json({ email: updated[0].email });
-});
-
-app.put('/api/admin/users/:id/email', authMiddleware, adminMiddleware, async (req, res) => {
-  const { email } = req.body;
-  const userId = req.params.id;
-  if (!email || !email.includes('@')) {
-    return res.status(400).json({ message: 'Email inválido' });
-  }
-  await pool.query('UPDATE users SET email = ? WHERE id = ?', [email, userId]);
-  res.json({ message: 'Email actualizado' });
-});
-
-// ─────────────────────────────────────────────
-//  FUNCIÓN PARA ENVIAR CORREO (NODEMAILER)
+//  FUNCIÓN PARA ENVIAR CORREO (GMAIL API)
 // ─────────────────────────────────────────────
 async function sendReminderEmail(userEmail, username, todayDate) {
   try {
     const gmail = google.gmail({ version: 'v1', auth: oauth2Client });
 
-    // Estructura del correo estándar RFC 2822 requerida por la API de Google
     const rawMessage = Buffer.from(
       `From: "Regalos Diarios" <${process.env.GMAIL_USER}>\r\n` +
       `To: ${userEmail}\r\n` +
@@ -216,38 +260,32 @@ async function sendReminderEmail(userEmail, username, todayDate) {
       `</div>`
     );
 
-    // La API de Gmail exige que el string esté codificado en Base64 URL Safe
-    const encodedMessage = rawMessage.toString('base64')
-      .replace(/\+/g, '-')
-      .replace(/\//g, '_')
-      .replace(/=+$/, '');
+    const encodedMessage = rawMessage.toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 
-    // Hacemos la petición por el puerto 443 (HTTP), el cual Render NO bloquea
     const response = await gmail.users.messages.send({
       userId: 'me',
-      requestBody: {
-        raw: encodedMessage,
-      },
+      requestBody: { raw: encodedMessage },
     });
 
-    console.log(`✅ Recordatorio enviado vía API de Gmail a ${userEmail} (ID: ${response.data.id})`);
+    console.log(`✅ Recordatorio enviado a ${userEmail} (ID: ${response.data.id})`);
   } catch (error) {
-    console.error(`❌ Error enviando vía API a ${userEmail}:`, error);
+    console.error(`❌ Error enviando a ${userEmail}:`, error);
   }
 }
 
 // ─────────────────────────────────────────────
-//  CRON DIARIO (8:00 AM HORA RD)
+//  CRON DIARIO (10:30 AM HORA RD)
 // ─────────────────────────────────────────────
 cron.schedule('30 10 * * *', async () => {
   console.log('Ejecutando recordatorios diarios a las 10:30 AM...');
   const todayRD = getTodayRD();
   
   try {
-    // 1. Buscamos solo usuarios que NO hayan recibido el correo hoy
+    // NUEVO: Filtramos agregando "AND reminders_enabled = 1"
     const [users] = await pool.query(
       `SELECT id, username, email FROM users 
        WHERE email IS NOT NULL AND email != '' 
+       AND reminders_enabled = 1
        AND start_date <= ? AND end_date >= ?
        AND (last_reminder_sent IS NULL OR last_reminder_sent < ?)`,
       [todayRD, todayRD, todayRD]
@@ -262,7 +300,6 @@ cron.schedule('30 10 * * *', async () => {
       if (existing.length === 0) {
         await sendReminderEmail(user.email, user.username, todayRD);
         
-        // 2. IMPORTANTE: Guardamos en la BD que ya se le envió el correo hoy
         await pool.query(
           'UPDATE users SET last_reminder_sent = ? WHERE id = ?', 
           [todayRD, user.id]
@@ -279,7 +316,7 @@ cron.schedule('30 10 * * *', async () => {
 //  ADMIN: USUARIOS Y REGALOS GLOBALES
 // ─────────────────────────────────────────────
 app.get('/api/admin/users', authMiddleware, adminMiddleware, async (req, res) => {
-  const [rows] = await pool.query('SELECT id, username, role, start_date, end_date, email, created_at FROM users');
+  const [rows] = await pool.query('SELECT id, username, role, start_date, end_date, email, reminders_enabled, created_at FROM users');
   res.json(rows);
 });
 
@@ -290,15 +327,17 @@ app.post('/api/admin/users', authMiddleware, adminMiddleware, async (req, res) =
     'INSERT INTO users (username, password, role, start_date, end_date, email) VALUES (?, ?, ?, ?, ?, ?)',
     [username, hashed, role, start_date, end_date, email || null]
   );
-  const [newUser] = await pool.query('SELECT id, username, role, start_date, end_date, email FROM users WHERE id = ?', [result.insertId]);
+  const [newUser] = await pool.query('SELECT id, username, role, start_date, end_date, email, reminders_enabled FROM users WHERE id = ?', [result.insertId]);
   res.status(201).json(newUser[0]);
 });
 
 app.put('/api/admin/users/:id', authMiddleware, adminMiddleware, async (req, res) => {
   const { start_date, end_date, role, password, email } = req.body;
   const userId = req.params.id;
+  
   let query = 'UPDATE users SET start_date = ?, end_date = ?, role = ?';
   let params = [start_date, end_date, role];
+  
   if (password) {
     const hashed = await bcrypt.hash(password, 10);
     query += ', password = ?';
@@ -308,10 +347,12 @@ app.put('/api/admin/users/:id', authMiddleware, adminMiddleware, async (req, res
     query += ', email = ?';
     params.push(email);
   }
+  
   query += ' WHERE id = ?';
   params.push(userId);
+  
   await pool.query(query, params);
-  const [updated] = await pool.query('SELECT id, username, role, start_date, end_date, email FROM users WHERE id = ?', [userId]);
+  const [updated] = await pool.query('SELECT id, username, role, start_date, end_date, email, reminders_enabled FROM users WHERE id = ?', [userId]);
   res.json(updated[0]);
 });
 
