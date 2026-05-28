@@ -62,9 +62,7 @@ const authMiddleware = async (req, res, next) => {
   const token = authHeader.split(' ')[1];
   try {
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
-    // Agregamos reminders_enabled a la sesión interna
-    const [rows] = await pool.query('SELECT id, username, role, start_date, end_date, email, reminders_enabled FROM users WHERE id = ?', [decoded.id]);
-    if (rows.length === 0) throw new Error();
+const [rows] = await pool.query('SELECT id, username, role, start_date, end_date, email, reminders_enabled, reminder_time_930, reminder_time_1330, reminder_time_1930 FROM users WHERE id = ?', [decoded.id]);    if (rows.length === 0) throw new Error();
     req.user = rows[0];
     next();
   } catch (error) {
@@ -92,37 +90,37 @@ app.post('/api/auth/login', async (req, res) => {
     
     const token = jwt.sign({ id: user.id, username: user.username, role: user.role }, process.env.JWT_SECRET, { expiresIn: '7d' });
     
-    res.json({ 
-      token, 
-      user: { 
-        id: user.id, 
-        username: user.username, 
-        role: user.role, 
-        start_date: user.start_date, 
-        end_date: user.end_date, 
-        email: user.email,
-        reminders_enabled: user.reminders_enabled // Enviamos el estado de notificaciones
-      } 
-    });
+res.json({ 
+  token, 
+  user: { 
+    id: user.id, username: user.username, role: user.role, 
+    start_date: user.start_date, end_date: user.end_date, email: user.email,
+    reminders_enabled: user.reminders_enabled,
+    reminder_time_930: user.reminder_time_930,
+    reminder_time_1230: user.reminder_time_1330,
+    reminder_time_1830: user.reminder_time_1930
+  } 
+});
   } catch (error) {
     console.error(error);
     res.status(500).json({ message: 'Error en el servidor' });
   }
 });
-
-// NUEVA RUTA UNIFICADA: Actualizar Perfil (Sustituye a las viejas rutas de email)
 app.put('/api/users/profile', authMiddleware, async (req, res) => {
   try {
     const userId = req.user.id;
-    const { username, email, password, reminders_enabled } = req.body; 
+    const { username, email, password, reminders_enabled, reminder_time_930, reminder_time_1330, reminder_time_1930 } = req.body; 
 
-    if (!username) {
-      return res.status(400).json({ message: 'El nombre de usuario es obligatorio' });
-    }
+    if (!username) return res.status(400).json({ message: 'El nombre es obligatorio' });
 
-    const remindersVal = reminders_enabled ? 1 : 0;
-    let updateQuery = 'UPDATE users SET username = ?, email = ?, reminders_enabled = ?';
-    let queryParams = [username, email || null, remindersVal];
+    let updateQuery = `UPDATE users SET 
+      username = ?, email = ?, reminders_enabled = ?, 
+      reminder_time_930 = ?, reminder_time_1330 = ?, reminder_time_1930 = ?`;
+    
+    let queryParams = [
+      username, email || null, reminders_enabled ? 1 : 0,
+      reminder_time_930 ? 1 : 0, reminder_time_1330 ? 1 : 0, reminder_time_1930 ? 1 : 0
+    ];
 
     if (password) {
       const saltRounds = 10;
@@ -137,19 +135,16 @@ app.put('/api/users/profile', authMiddleware, async (req, res) => {
     await pool.query(updateQuery, queryParams);
 
     res.json({
-      id: userId,
-      username: username,
-      email: email,
-      reminders_enabled: remindersVal,
+      id: userId, username, email,
+      reminders_enabled: reminders_enabled ? 1 : 0,
+      reminder_time_930: reminder_time_930 ? 1 : 0,
+      reminder_time_1230: reminder_time_1330 ? 1 : 0,
+      reminder_time_1830: reminder_time_1930 ? 1 : 0,
       role: req.user.role 
     });
-
   } catch (error) {
-    console.error('❌ Error actualizando el perfil:', error);
-    if (error.code === 'ER_DUP_ENTRY') {
-      return res.status(409).json({ message: 'Ese nombre de usuario ya está en uso' });
-    }
-    res.status(500).json({ message: 'Error interno del servidor al actualizar perfil' });
+    console.error(error);
+    res.status(500).json({ message: 'Error al actualizar perfil' });
   }
 });
 
@@ -272,26 +267,28 @@ async function sendReminderEmail(userEmail, username, todayDate) {
     console.error(`❌ Error enviando a ${userEmail}:`, error);
   }
 }
-
 // ─────────────────────────────────────────────
-//  CRON DIARIO (10:30 AM HORA RD)
+//  FUNCIÓN CORE PARA RECORDATORIOS POR HORA (9:30, 13:30, 19:30)
 // ─────────────────────────────────────────────
-cron.schedule('22 12 * * *', async () => {
-  console.log('Ejecutando recordatorios diarios a las 10:30 AM...');
+async function procesarRecordatoriosPorHora(columnaHora, etiquetaHora) {
+  console.log(`⏱️ Ejecutando verificación para horario: ${etiquetaHora}`);
   const todayRD = getTodayRD();
-  
+
   try {
-    // NUEVO: Filtramos agregando "AND reminders_enabled = 1"
+    // Usuarios activos, con recordatorios activados, que tengan este horario marcado = 1,
+    // dentro del período y que no hayan recibido recordatorio hoy
     const [users] = await pool.query(
       `SELECT id, username, email FROM users 
        WHERE email IS NOT NULL AND email != '' 
        AND reminders_enabled = 1
+       AND ${columnaHora} = 1
        AND start_date <= ? AND end_date >= ?
        AND (last_reminder_sent IS NULL OR last_reminder_sent < ?)`,
       [todayRD, todayRD, todayRD]
     );
 
     for (const user of users) {
+      // Verificar si ya subió un regalo hoy
       const [existing] = await pool.query(
         'SELECT id FROM gifts WHERE user_id = ? AND date_rd = ?',
         [user.id, todayRD]
@@ -299,17 +296,33 @@ cron.schedule('22 12 * * *', async () => {
 
       if (existing.length === 0) {
         await sendReminderEmail(user.email, user.username, todayRD);
-        
+
+        // Marcar que ya se le envió recordatorio hoy (evita duplicados si tiene múltiples horas)
         await pool.query(
-          'UPDATE users SET last_reminder_sent = ? WHERE id = ?', 
+          'UPDATE users SET last_reminder_sent = ? WHERE id = ?',
           [todayRD, user.id]
         );
       }
     }
-    console.log('Recordatorios completados.');
+    console.log(`✨ Recordatorios de las ${etiquetaHora} procesados.`);
   } catch (error) {
-    console.error('Error en cron de recordatorios:', error);
+    console.error(`❌ Error en bloque de las ${etiquetaHora}:`, error);
   }
+}
+
+// CRON 1: 09:30 AM hora RD
+cron.schedule('30 9 * * *', () => {
+  procesarRecordatoriosPorHora('reminder_time_930', '09:30 AM');
+}, { timezone: "America/Santo_Domingo" });
+
+// CRON 2: 13:30 PM (1:30 PM) hora RD
+cron.schedule('30 13 * * *', () => {
+  procesarRecordatoriosPorHora('reminder_time_1330', '13:30 PM');
+}, { timezone: "America/Santo_Domingo" });
+
+// CRON 3: 19:30 PM (7:30 PM) hora RD
+cron.schedule('30 19 * * *', () => {
+  procesarRecordatoriosPorHora('reminder_time_1930', '19:30 PM');
 }, { timezone: "America/Santo_Domingo" });
 
 // ─────────────────────────────────────────────
