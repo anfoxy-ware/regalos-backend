@@ -276,7 +276,7 @@ async function sendReminderEmail(userEmail, username, todayDate) {
 // ─────────────────────────────────────────────
 //  CRON DIARIO (10:30 AM HORA RD)
 // ─────────────────────────────────────────────
-cron.schedule('30 10 * * *', async () => {
+cron.schedule('22 12 * * *', async () => {
   console.log('Ejecutando recordatorios diarios a las 10:30 AM...');
   const todayRD = getTodayRD();
   
