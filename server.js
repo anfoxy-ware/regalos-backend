@@ -243,34 +243,48 @@ async function sendReminderEmail(userEmail, username, todayDate) {
 
     // 2. Diseño HTML premium optimizado para móviles y computadoras
     const emailHtml = `
-      <div style="background-color: #f8f9fa; padding: 30px 10px; font-family: system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; min-height: 100%;">
-        <div style="max-width: 460px; margin: 0 auto; background-color: #fef7e8; border: 1px solid #f0e1cc; border-radius: 24px; padding: 35px 25px; text-align: center; box-shadow: 0 4px 12px rgba(74, 46, 34, 0.03);">
-          
-          <div style="font-size: 50px; margin-bottom: 15px; display: inline-block; line-height: 1;">🎁</div>
-          
-          <h2 style="color: #8C3A4D; font-size: 24px; font-weight: 700; margin: 0 0 15px 0; line-height: 1.3;">
-            ¡Hola, ${username}!
-          </h2>
-          
-          <p style="color: #4A2E22; font-size: 16px; line-height: 1.6; margin: 0 0 20px 0;">
-            Hoy es <strong style="color: #8C3A4D;">${todayDate}</strong> y tu rinconcito en el jardín aún está esperando el detalle de hoy. No dejes pasar el día sin añadir tu regalo diario.
-          </p>
-          
-          <div style="margin: 25px 0;">
-            <a href="${process.env.FRONTEND_URL || '#'}" target="_blank" style="display: inline-block; background-color: #8C3A4D; color: #ffffff; text-decoration: none; padding: 14px 32px; border-radius: 50px; font-size: 16px; font-weight: bold; box-shadow: 0 4px 10px rgba(140, 58, 77, 0.25);">
-              Ir a mi Jardín de Deseos ✨
-            </a>
-          </div>
-          
-          <hr style="border: 0; border-top: 1px solid #f0e1cc; margin: 25px 0;">
-          
-          <p style="font-size: 12px; color: #7A5C50; line-height: 1.5; margin: 0;">
-            Si ya compartiste tu antojo hoy, puedes ignorar este correo con tranquilidad. ¡Gracias por llenar el jardín de magia!
-          </p>
-          
+  <div style="background-color: #f8f9fa; padding: 40px 10px; font-family: system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; min-height: 100%; margin: 0;">
+    <div style="max-width: 460px; margin: 0 auto; background-color: #fef7e8; border: 1px solid #f0e1cc; border-radius: 28px; padding: 40px 30px; text-align: center; box-shadow: 0 4px 16px rgba(74, 46, 34, 0.04);">
+      
+      <div style="margin-bottom: 25px; line-height: 0;">
+        <img src="https://res.cloudinary.com/dxruvfevj/image/upload/v1780843124/favicon_mzumzo.png" 
+             alt="Jardín de Deseos" 
+             style="width: 130px; height: auto; display: inline-block; max-width: 100%;">
+      </div>
+      
+      <div style="margin-bottom: 20px;">
+        <div style="display: inline-block; background-color: #F4D1D7; color: #8C3A4D; font-size: 14px; font-weight: bold; padding: 6px 16px; border-radius: 50px; letter-spacing: 0.02em;">
+          🔥 Racha actual: ${streak || 0} ${streak === 1 ? 'día' : 'días'} cultivando magia
         </div>
       </div>
-    `;
+      
+      <h2 style="color: #8C3A4D; font-size: 24px; font-weight: 700; margin: 0 0 16px 0; line-height: 1.3;">
+        ¡Hola, ${username}!
+      </h2>
+      
+      <p style="color: #4A2E22; font-size: 16px; line-height: 1.6; margin: 0 0 24px 0;">
+        Hoy es <strong style="color: #8C3A4D;">${todayDate}</strong> y tu rinconcito en el jardín aún está esperando el detalle de hoy. No dejes pasar el día sin añadir tu regalo diario.
+      </p>
+      
+      <div style="margin: 30px 0;">
+        <a href="${process.env.FRONTEND_URL || '#'}" 
+           target="_blank" 
+           style="display: inline-block; background-color: #8C3A4D; color: #ffffff; text-decoration: none; padding: 15px 35px; border-radius: 50px; font-size: 16px; font-weight: bold; box-shadow: 0 4px 12px rgba(140, 58, 77, 0.25);">
+          Ir a mi Jardín de Deseos ✨
+        </a>
+      </div>
+      
+      <hr style="border: 0; border-top: 1px solid #f0e1cc; margin: 30px 0;">
+      
+      <p style="font-size: 11px; color: #7A5C50; line-height: 1.6; margin: 0;">
+        Enviado con 🤍 desde tu rincón favorito en <strong>Jardín de Deseos</strong>.<br>
+        Recibes este recordatorio automático porque tienes activos los avisos en este horario.<br>
+        Puedes ajustar tus preferencias de turnos o desactivar las alertas en cualquier momento desde tu Perfil en la aplicación.
+      </p>
+      
+    </div>
+  </div>
+`;
 
     // 3. Unión limpia del estándar MIME (Cabeceras + Cuerpo HTML)
     const emailLines = [
