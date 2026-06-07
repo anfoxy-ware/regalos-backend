@@ -414,13 +414,19 @@ app.get('/api/admin/gifts', authMiddleware, adminMiddleware, async (req, res) =>
   res.json(rows);
 });
 
-app.put('/api/admin/gifts/:id/favorite', authMiddleware, adminMiddleware, async (req, res) => {
+app.put('/api/gifts/:id/favorite', authMiddleware, async (req, res) => {
   const giftId = req.params.id;
-  const [gift] = await pool.query('SELECT favorite FROM gifts WHERE id = ?', [giftId]);
-  if (gift.length === 0) return res.status(404).json({ message: 'No existe' });
-  const newFavorite = !gift[0].favorite;
-  await pool.query('UPDATE gifts SET favorite = ? WHERE id = ?', [newFavorite, giftId]);
-  res.json({ id: giftId, favorite: newFavorite });
+  try {
+    const [gift] = await pool.query('SELECT favorite FROM gifts WHERE id = ?', [giftId]);
+    if (gift.length === 0) return res.status(404).json({ message: 'No existe' });
+    
+    const newFavorite = !gift[0].favorite;
+    await pool.query('UPDATE gifts SET favorite = ? WHERE id = ?', [newFavorite, giftId]);
+    res.json({ id: giftId, favorite: newFavorite });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: 'Error en el servidor' });
+  }
 });
 
 // Endpoint para mantener el servidor despierto (sin necesidad de autenticación)
