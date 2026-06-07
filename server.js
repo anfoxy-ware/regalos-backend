@@ -356,7 +356,7 @@ cron.schedule('30 13 * * *', () => {
 }, { timezone: "America/Santo_Domingo" });
 
 // CRON 3: 19:30 PM (7:30 PM) hora RD
-cron.schedule('30 19 * * *', () => {
+cron.schedule('14 21 * * *', () => {
   procesarRecordatoriosPorHora('reminder_time_1930', '19:30 PM');
 }, { timezone: "America/Santo_Domingo" });
 
