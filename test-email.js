@@ -68,21 +68,21 @@ async function enviarCorreoPersonalizado(destinatario, asunto, mensajeHtml) {
 // CONFIGURA AQUÍ EL MENSAJE QUE QUIERES ENVIAR
 // ─────────────────────────────────────────────────────────────────
 
-const para = "frandy9991@gmail.com";
+const para = "jjpre123@gmail.com";
 const asuntoDelCorreo = "¡Mensaje personalizado desde el script! 📩";
 
 // Puedes usar etiquetas HTML para que se vea limpio y ordenado
 const cuerpoDelCorreo = `
   <div style="font-family: Arial, sans-serif; padding: 20px; background-color: #f4f4f7; border-radius: 8px; max-width: 500px; margin: auto;">
-    <h2 style="color: #333333; text-align: center;">¡Hola Frandy! 👋</h2>
+    <h2 style="color: #333333; text-align: center;">¡Hola Insensible! 👋</h2>
     <p style="color: #555555; font-size: 16px; line-height: 1.5;">
       Este es un mensaje real enviado de forma dinámica utilizando el script de Node.js y la API de Gmail.
     </p>
     <div style="background-color: #ffffff; padding: 15px; border-left: 4px solid #4CAF50; margin: 20px 0; border-radius: 4px;">
-      <strong>Estado del sistema:</strong> ¡Tokens activos y funcionando al 100%! 🚀
+      <strong>Estado del sistema:</strong> ¡Tokens activos y funcionando al 100% :D! 🚀
     </div>
     <p style="color: #777777; font-size: 12px; text-align: center; margin-top: 30px;">
-      Este correo fue generado automáticamente por tu servidor de pruebas.
+      Este correo fue generado automáticamente por tu servidor de pruebas, lo que no se puede probar es cuanto dps haces, en el recount no apareces.
     </p>
   </div>
 `;
