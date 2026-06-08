@@ -25,9 +25,9 @@ app.use(express.json());
 
 // Prevención de fuerza bruta en el Login
 const loginLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutos
-  max: 5, // Límite de 5 intentos por IP
-  message: { message: "Demasiados intentos. Por favor, inténtalo de nuevo en 15 minutos." }
+  windowMs: 1 * 60 * 1000, // 1 minuto
+  max: 15, // Límite de 15 intentos por minuto por IP
+  message: { message: "Demasiados intentos. Por favor, inténtalo de nuevo en un minuto." }
 });
 
 cloudinary.config({
