@@ -17,7 +17,7 @@ const app = express();
 //   SEGURIDAD Y CONFIGURACIÓN BÁSICA
 // ─────────────────────────────────────────────
 app.use(cors({
-  origin: '*', 
+  origin: 'https://regalame-un-dia.netlify.app', 
   methods: ['GET', 'POST', 'PUT', 'DELETE'],
   credentials: true
 }));
