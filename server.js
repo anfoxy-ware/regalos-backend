@@ -136,7 +136,7 @@ const checkGardenMembership = async (req, res, next) => {
 // ─────────────────────────────────────────────
 //  RUTAS DE AUTENTICACIÓN Y PERFIL
 // ─────────────────────────────────────────────
-app.post('/api/auth/login', loginLimiter, async (req, res) => {
+app.post('/api/auth/login', async (req, res) => {
   const { username, password } = req.body;
   try {
     const [rows] = await pool.query('SELECT * FROM users WHERE username = ?', [username]);
