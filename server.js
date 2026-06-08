@@ -254,7 +254,7 @@ async function sendReminderEmail(userEmail, username, todayDate) {
       
       <div style="margin-bottom: 20px;">
         <div style="display: inline-block; background-color: #F4D1D7; color: #8C3A4D; font-size: 14px; font-weight: bold; padding: 6px 16px; border-radius: 50px; letter-spacing: 0.02em;">
-          🔥 Racha actual: ${streak || 0} ${streak === 1 ? 'día' : 'días'} cultivando magia
+          🔥 ¡No pierdas tu racha! Mantén tu jardín lleno de magia.
         </div>
       </div>
       
@@ -315,8 +315,7 @@ async function sendReminderEmail(userEmail, username, todayDate) {
   } catch (error) {
     console.error(`❌ Error enviando a ${userEmail}:`, error);
   }
-}
-// ─────────────────────────────────────────────
+}// ─────────────────────────────────────────────
 //  FUNCIÓN CORE PARA RECORDATORIOS POR HORA (9:30, 13:30, 19:30)
 // ─────────────────────────────────────────────
 async function procesarRecordatoriosPorHora(columnaHora, etiquetaHora) {
@@ -324,36 +323,37 @@ async function procesarRecordatoriosPorHora(columnaHora, etiquetaHora) {
   const todayRD = getTodayRD();
 
   try {
-    // Usuarios activos, con recordatorios activados, que tengan este horario marcado = 1,
-    // dentro del período y que no hayan recibido recordatorio hoy
+    // 1. Buscamos usuarios activos que tengan este horario marcado = 1
+    // ELIMINADA la validación de last_reminder_sent para no bloquear los turnos
     const [users] = await pool.query(
       `SELECT id, username, email FROM users 
        WHERE email IS NOT NULL AND email != '' 
        AND reminders_enabled = 1
        AND ${columnaHora} = 1
-       AND start_date <= ? AND end_date >= ?
-       AND (last_reminder_sent IS NULL OR last_reminder_sent < ?)`,
-      [todayRD, todayRD, todayRD]
+       AND start_date <= ? AND end_date >= ?`,
+      [todayRD, todayRD]
     );
 
     for (const user of users) {
-      // Verificar si ya subió un regalo hoy
+      // 2. LA ÚNICA CONDICIÓN: Verificar si ya subió un regalo hoy en la BD
       const [existing] = await pool.query(
         'SELECT id FROM gifts WHERE user_id = ? AND date_rd = ?',
         [user.id, todayRD]
       );
 
+      // 3. Si NO hay regalo, se envía el recordatorio correspondiente a la hora
       if (existing.length === 0) {
         await sendReminderEmail(user.email, user.username, todayRD);
-
-        // Marcar que ya se le envió recordatorio hoy (evita duplicados si tiene múltiples horas)
-        await pool.query(
-          'UPDATE users SET last_reminder_sent = ? WHERE id = ?',
-          [todayRD, user.id]
-        );
+        console.log(`📩 Aviso de las ${etiquetaHora} enviado a ${user.username}`);
+        
+        // ¡ELIMINADO el UPDATE a last_reminder_sent! 
+        // No necesitamos guardar si se envió correo, solo nos importa si hay regalo.
+      } else {
+        // Opcional: Un log para confirmar que el sistema detectó el regalo
+        console.log(`✨ ${user.username} ya tiene su regalo hoy. Omitiendo alerta de las ${etiquetaHora}.`);
       }
     }
-    console.log(`✨ Recordatorios de las ${etiquetaHora} procesados.`);
+    console.log(`✅ Turno de las ${etiquetaHora} finalizado.`);
   } catch (error) {
     console.error(`❌ Error en bloque de las ${etiquetaHora}:`, error);
   }
